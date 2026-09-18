@@ -7,7 +7,7 @@ RACEFLAGS := -fsanitize=thread -fno-omit-frame-pointer
 BIN := bin
 INTERNAL := internal/futex/futex.cpp internal/testing/testing.cpp
 
-.PHONY: all test race stress bench vet check clean one $(PKGS) \
+.PHONY: all test race stress bench vet check ci clean one $(PKGS) \
         spinlock mutex semaphore waitgroup once rwmutex barrier
 
 all: check
@@ -64,6 +64,9 @@ vet: build
 
 check: vet race stress
 	@echo "всё зелёное"
+
+ci: test race bench
+	@echo "CI: всё зелёное"
 
 clean:
 	rm -rf $(BIN)

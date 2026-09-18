@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: какие папки менялись
+    runs-on: ubuntu-latest
+    outputs:
+      dirs: ${{ steps.changed.outputs.dirs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: changed
+        shell: bash
+        run: |
+          set -eu
+
+          case "${{ github.event_name }}" in
+            pull_request)
+              base='${{ github.event.pull_request.base.sha }}'
+              head='${{ github.event.pull_request.head.sha }}'
+              ;;
+            push)
+              base='${{ github.event.before }}'
+              head='${{ github.sha }}'
+              ;;
+            *)
+              base=''
+              head='${{ github.sha }}'
+              ;;
+          esac
+
+          # Ручной запуск, первый пуш ветки, force-push: предка нет, берём весь репозиторий.
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            files=$(git diff --name-only "$base" "$head")
+          else
+            files=$(git ls-files)
+          fi
+
+          # Правка самого CI касается всех папок.
+          if printf '%s\n' "$files" | grep -q '^\.github/'; then
+            files=$(git ls-files)
+          fi
+
+          # Для каждого изменённого файла поднимаемся вверх до ближайшей папки с Makefile.
+          dirs=$(printf '%s\n' "$files" | while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            d=$(dirname "$f")
+            while [ "$d" != "." ] && [ ! -f "$d/Makefile" ]; do
+              d=$(dirname "$d")
+            done
+            [ "$d" != "." ] && printf '%s\n' "$d"
+          done | sort -u)
+
+          echo "Затронутые папки с Makefile:"
+          printf '%s\n' "$dirs"
+
+          json=$(printf '%s\n' "$dirs" | awk 'NF' | jq -R . | jq -sc .)
+          echo "dirs=$json" >> "$GITHUB_OUTPUT"
+
+  make:
+    name: ${{ matrix.dir }}
+    needs: detect
+    if: needs.detect.outputs.dirs != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJSON(needs.detect.outputs.dirs) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: make
+        working-directory: ${{ matrix.dir }}
+        shell: bash
+        run: |
+          set -eu
+          if grep -qE '^ci:' Makefile; then
+            make ci
+          else
+            make
+          fi
+
+  green:
+    name: CI
+    if: always()
+    needs: [detect, make]
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        run: |
+          echo "detect: ${{ needs.detect.result }}"
+          echo "make:   ${{ needs.make.result }}"
+          [ "${{ needs.detect.result }}" = "success" ] || exit 1
+          case "${{ needs.make.result }}" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
