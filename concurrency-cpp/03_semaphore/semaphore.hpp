@@ -16,6 +16,7 @@ public:
 
 private:
     std::atomic<uint32_t> permits{0};
+    std::atomic<uint32_t> waiters{0};
 };
 
 }  // namespace semaphore

@@ -13,6 +13,7 @@ public:
 
 private:
     std::atomic<uint32_t> state{0};
+    std::atomic<uint32_t> waiters{0};
 };
 
 }  // namespace once
